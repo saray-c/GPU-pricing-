@@ -1,4 +1,4 @@
-"""
+"
 Weekly GPU price updater.
 Scrapes vendor/aggregator pages and updates prices.json.
 Falls back to existing prices if a page is unreachable or layout changed.
