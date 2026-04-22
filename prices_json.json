@@ -1,0 +1,13 @@
+{
+  "updated": "2026-04-22",
+  "vendors": [
+    { "vendor": "Hydrahost",          "h100": 2.30,  "a100": 1.19,  "h200": null,  "avail": "limited",    "availNote": "Smaller provider; capacity can be tight" },
+    { "vendor": "Runpod",             "h100": 2.69,  "a100": 1.49,  "h200": 3.59,  "avail": "high",       "availNote": "Large community marketplace; instant spin-up" },
+    { "vendor": "Lambda Labs",        "h100": 2.99,  "a100": 1.48,  "h200": null,  "avail": "medium",     "availNote": "On-demand only; H100/A100 inventory strong, can sell out" },
+    { "vendor": "CoreWeave",          "h100": 6.16,  "a100": 2.70,  "h200": 6.16,  "avail": "enterprise", "availNote": "Requires enterprise onboarding; 3–6 month commitment for reserved" },
+    { "vendor": "AWS",                "h100": 3.90,  "a100": 3.40,  "h200": 3.20,  "avail": "high",       "availNote": "Global availability; Capacity Blocks for guaranteed access" },
+    { "vendor": "Oracle (OCI)",       "h100": 10.00, "a100": 4.00,  "h200": 10.00, "avail": "medium",     "availNote": "Bare-metal only; 8-GPU minimum per instance" },
+    { "vendor": "Google Cloud (GCP)", "h100": 3.00,  "a100": 5.07,  "h200": 3.72,  "avail": "high",       "availNote": "Global availability; A3/A3-mega instances" },
+    { "vendor": "Nebius",             "h100": 2.95,  "a100": null,  "h200": 3.50,  "avail": "medium",     "availNote": "European data centers (GDPR); InfiniBand support" }
+  ]
+}
