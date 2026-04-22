@@ -1,0 +1,179 @@
+"""
+Weekly GPU price updater.
+Scrapes vendor/aggregator pages and updates prices.json.
+Falls back to existing prices if a page is unreachable or layout changed.
+"""
+
+import json, re, time
+from datetime import date
+from pathlib import Path
+import requests
+from bs4 import BeautifulSoup
+
+HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; price-bot/1.0)"}
+PRICES_FILE = Path(__file__).parent.parent / "prices.json"
+
+# ── helpers ────────────────────────────────────────────────────────────────────
+
+def get(url: str, timeout: int = 20) -> str:
+    try:
+        r = requests.get(url, headers=HEADERS, timeout=timeout)
+        r.raise_for_status()
+        return r.text
+    except Exception as e:
+        print(f"  WARN: could not fetch {url}: {e}")
+        return ""
+
+def first_price(text: str, *patterns: str) -> float | None:
+    """Find the first dollar amount near any of the given keyword patterns."""
+    for pat in patterns:
+        m = re.search(rf"{pat}.*?\$\s*([\d]+\.[\d]{{2}})", text, re.I | re.S)
+        if m:
+            return float(m.group(1))
+        m = re.search(rf"\$\s*([\d]+\.[\d]{{2}}).*?{pat}", text, re.I | re.S)
+        if m:
+            return float(m.group(1))
+    return None
+
+def load_existing() -> dict:
+    with open(PRICES_FILE) as f:
+        return json.load(f)
+
+def vendor_map(data: dict) -> dict:
+    """Return {vendor_name: price_dict} for easy lookup."""
+    return {v["vendor"]: v for v in data["vendors"]}
+
+# ── scrapers (one per vendor) ──────────────────────────────────────────────────
+
+def scrape_runpod() -> dict:
+    print("  Scraping RunPod...")
+    html = get("https://www.runpod.io/pricing")
+    prices = {}
+    if html:
+        # RunPod shows prices as plain text like "$2.69 /hr"
+        h100 = first_price(html, r"H100\s*SXM", r"H100\s*80GB")
+        a100 = first_price(html, r"A100\s*SXM", r"A100\s*80GB")
+        h200 = first_price(html, r"H200")
+        if h100: prices["h100"] = h100
+        if a100: prices["a100"] = a100
+        if h200: prices["h200"] = h200
+    return prices
+
+def scrape_lambda() -> dict:
+    print("  Scraping Lambda Labs...")
+    html = get("https://lambda.ai/pricing")
+    prices = {}
+    if html:
+        h100 = first_price(html, r"H100", r"h100")
+        a100 = first_price(html, r"A100", r"a100")
+        if h100: prices["h100"] = h100
+        if a100: prices["a100"] = a100
+    return prices
+
+def scrape_coreweave() -> dict:
+    print("  Scraping CoreWeave...")
+    html = get("https://www.coreweave.com/gpu-cloud-pricing")
+    prices = {}
+    if html:
+        h100 = first_price(html, r"H100")
+        a100 = first_price(html, r"A100")
+        h200 = first_price(html, r"H200")
+        if h100: prices["h100"] = h100
+        if a100: prices["a100"] = a100
+        if h200: prices["h200"] = h200
+    return prices
+
+def scrape_getdeploying() -> dict:
+    """
+    Aggregator page — good fallback for providers we can't scrape directly.
+    Returns nested dict: {vendor_key: {gpu_key: price}}
+    """
+    print("  Scraping getdeploying.com (aggregator)...")
+    result = {}
+    for gpu, slug in [("h100", "nvidia-h100"), ("a100", "nvidia-a100"), ("h200", "nvidia-h200")]:
+        html = get(f"https://getdeploying.com/gpus/{slug}")
+        if not html:
+            continue
+        soup = BeautifulSoup(html, "html.parser")
+        # Page has a table with provider names and on-demand prices
+        for row in soup.select("tr"):
+            cells = row.find_all("td")
+            if len(cells) < 2:
+                continue
+            name = cells[0].get_text(strip=True).lower()
+            price_text = cells[1].get_text(strip=True)
+            m = re.search(r"\$([\d]+\.[\d]{2})", price_text)
+            if not m:
+                continue
+            price = float(m.group(1))
+            # Map to our vendor keys
+            for vendor_key, aliases in [
+                ("AWS",                ["aws", "amazon"]),
+                ("Google Cloud (GCP)", ["google", "gcp"]),
+                ("Oracle (OCI)",       ["oracle", "oci"]),
+                ("Nebius",             ["nebius"]),
+                ("Hydrahost",          ["hydrahost"]),
+            ]:
+                if any(a in name for a in aliases):
+                    if vendor_key not in result:
+                        result[vendor_key] = {}
+                    result[vendor_key][gpu] = price
+        time.sleep(0.5)
+    return result
+
+# ── main ───────────────────────────────────────────────────────────────────────
+
+def main():
+    print("Loading existing prices.json...")
+    data = load_existing()
+    vmap = vendor_map(data)
+    changed = []
+
+    def update(vendor: str, gpu: str, new_price: float | None):
+        if new_price is None:
+            return
+        old = vmap[vendor].get(gpu)
+        if old != new_price:
+            print(f"  {vendor} {gpu.upper()}: {old} → {new_price}")
+            changed.append(f"{vendor} {gpu.upper()}: {old} → {new_price}")
+        vmap[vendor][gpu] = new_price
+
+    # RunPod
+    rp = scrape_runpod()
+    update("Runpod", "h100", rp.get("h100"))
+    update("Runpod", "a100", rp.get("a100"))
+    update("Runpod", "h200", rp.get("h200"))
+
+    # Lambda Labs
+    lb = scrape_lambda()
+    update("Lambda Labs", "h100", lb.get("h100"))
+    update("Lambda Labs", "a100", lb.get("a100"))
+
+    # CoreWeave
+    cw = scrape_coreweave()
+    update("CoreWeave", "h100", cw.get("h100"))
+    update("CoreWeave", "a100", cw.get("a100"))
+    update("CoreWeave", "h200", cw.get("h200"))
+
+    # Aggregator for AWS, GCP, Oracle, Nebius, Hydrahost
+    agg = scrape_getdeploying()
+    for vendor, gpus in agg.items():
+        for gpu, price in gpus.items():
+            update(vendor, gpu, price)
+
+    # Write back
+    data["updated"] = str(date.today())
+    data["vendors"] = list(vmap.values())
+
+    with open(PRICES_FILE, "w") as f:
+        json.dump(data, f, indent=2)
+
+    if changed:
+        print(f"\n✅ Updated {len(changed)} price(s):")
+        for c in changed:
+            print(f"   {c}")
+    else:
+        print("\n✅ No price changes detected.")
+
+if __name__ == "__main__":
+    main()
